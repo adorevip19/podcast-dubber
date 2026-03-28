@@ -2,11 +2,11 @@
 podcast-dubber pipeline
 =======================
 Complete processing pipeline:
-  1. yt-dlp  \u2192 extract audio from YouTube
-  2. Whisper \u2192 transcribe with timestamps
-  3. GPT-4o  \u2192 translate segments to Simplified Chinese
-  4. TTS     \u2192 generate Chinese speech per segment
-  5. pydub   \u2192 align & stitch into final MP3
+  1. yt-dlp  -> extract audio from YouTube
+  2. Whisper -> transcribe with timestamps
+  3. GPT-4o  -> translate segments to Simplified Chinese
+  4. TTS     -> generate Chinese speech per segment
+  5. pydub   -> align & stitch into final MP3
 """
 
 import json
@@ -38,19 +38,34 @@ def _update(progress_cb, stage, pct):
 
 
 def download_audio(youtube_url, tmp_dir):
+    """Download YouTube audio as 128 kbps MP3. Returns path to mp3 file."""
+    # Upgrade yt-dlp to latest version first
+    subprocess.run(
+        ["pip", "install", "--upgrade", "yt-dlp"],
+        capture_output=True, text=True
+    )
     output_template = os.path.join(tmp_dir, "source.%(ext)s")
     cmd = [
         "yt-dlp", "-x", "--audio-format", "mp3",
         "--audio-quality", "128K", "--no-playlist",
         "-o", output_template, youtube_url,
     ]
-    subprocess.run(cmd, check=True, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"yt-dlp failed (exit {result.returncode}): {result.stderr[:500]}"
+        )
     mp3_path = os.path.join(tmp_dir, "source.mp3")
     if not os.path.exists(mp3_path):
         for f in os.listdir(tmp_dir):
             if f.endswith(".mp3"):
                 mp3_path = os.path.join(tmp_dir, f)
                 break
+    if not os.path.exists(mp3_path):
+        raise RuntimeError(
+            f"No mp3 file found after yt-dlp. Files: {os.listdir(tmp_dir)}. "
+            f"stdout: {result.stdout[:300]}"
+        )
     return mp3_path
 
 
@@ -76,7 +91,7 @@ def transcribe_audio(mp3_path):
 TRANSLATE_SYSTEM = (
     "You are a professional translator. Translate the following segments "
     "into Simplified Chinese. Return ONLY a JSON array where each element "
-    'has \"id\" (integer) and \"text\" (translated string). '
+    'has "id" (integer) and "text" (translated string). '
     "Preserve the original segment ids. Do not add any commentary."
 )
 BATCH_SIZE = 30
